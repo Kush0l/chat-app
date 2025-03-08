@@ -1,0 +1,1147 @@
+src/config/redisClient.js:-
+
+import { createClient } from 'redis';
+import dotenv from 'dotenv';
+dotenv.config();
+
+class RedisClient {
+  constructor() {
+    this.client = createClient({
+      url: `redis://${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`
+    });
+
+    this.client.on('error', (err) => {
+      console.error('Redis Client Error', err);
+    });
+  }
+
+  async connect() {
+    if (!this.client.isOpen) {
+      await this.client.connect();
+      console.log('Connected to Redis');
+    }
+  }
+
+  async disconnect() {
+    await this.client.quit();
+  }
+
+  // Caching methods for messages
+  async cacheGroupMessages(groupId, messages) {
+    await this.connect();
+    // Convert messages to string and cache
+    const serializedMessages = messages.map(msg => JSON.stringify(msg));
+    
+    // Cache messages with an expiration (e.g., 1 hour)
+    await this.client.del(`group:messages:${groupId}`);
+    if (serializedMessages.length > 0) {
+      await this.client.rPush(`group:messages:${groupId}`, serializedMessages);
+      await this.client.expire(`group:messages:${groupId}`, 3600); // 1 hour expiration
+    }
+  }
+
+  async cachePrivateMessages(chatId, messages) {
+    await this.connect();
+    // Convert messages to string and cache
+    const serializedMessages = messages.map(msg => JSON.stringify(msg));
+    
+    // Cache messages with an expiration (e.g., 1 hour)
+    await this.client.del(`private:messages:${chatId}`);
+    if (serializedMessages.length > 0) {
+      await this.client.rPush(`private:messages:${chatId}`, serializedMessages);
+      await this.client.expire(`private:messages:${chatId}`, 3600); // 1 hour expiration
+    }
+  }
+
+  async getCachedGroupMessages(groupId, page = 1, limit = 50) {
+    await this.connect();
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    const cachedMessages = await this.client.lRange(`group:messages:${groupId}`, start, end);
+    return cachedMessages.map(msg => JSON.parse(msg));
+  }
+
+  async getCachedPrivateMessages(chatId, page = 1, limit = 50) {
+    await this.connect();
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    const cachedMessages = await this.client.lRange(`private:messages:${chatId}`, start, end);
+    return cachedMessages.map(msg => JSON.parse(msg));
+  }
+
+  // Publish and subscribe methods remain the same
+  async publish(channel, message) {
+    await this.connect();
+    return this.client.publish(channel, message);
+  }
+
+  async subscribe(channel, callback) {
+    await this.connect();
+    const subscriber = this.client.duplicate();
+    await subscriber.connect();
+    await subscriber.subscribe(channel, callback);
+    return subscriber;
+  }
+
+  getClient() {
+    return this.client;
+  }
+}
+
+export default new RedisClient();
+
+
+models ::_
+
+Group.js:
+
+import mongoose from 'mongoose';
+
+const GroupSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  creator: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  members: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  admins: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  isPrivate: {
+    type: Boolean,
+    default: false
+  },
+  lastMessage: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message'
+  }
+}, { timestamps: true });
+
+export const Group = mongoose.model('Group', GroupSchema);
+
+Message.js:
+
+import mongoose from 'mongoose';
+
+const MessageSchema = new mongoose.Schema({
+  content: {
+    type: String,
+    required: true
+  },
+  sender: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  chat: {
+    type: mongoose.Schema.Types.ObjectId,
+    refPath: 'chatType',
+    required: true
+  },
+  chatType: {
+    type: String,
+    enum: ['Group', 'PrivateChat'],
+    required: true
+  },
+  readBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
+
+export const Message = mongoose.model('Message', MessageSchema);
+
+PrivateChat.js:
+
+import mongoose from 'mongoose';
+
+const PrivateChatSchema = new mongoose.Schema({
+  participants: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  lastMessage: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Message'
+  }
+}, { timestamps: true });
+
+export const PrivateChat = mongoose.model('PrivateChat', PrivateChatSchema);
+
+User.js:
+
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+
+const UserSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: [true, 'Username is required'],
+    unique: true,
+    trim: true,
+    minlength: [3, 'Username must be at least 3 characters'],
+    maxlength: [20, 'Username must be less than 20 characters']
+  },
+  email: {
+    type: String,
+    required: [true, 'Email is required'],
+    unique: true,
+    trim: true,
+    lowercase: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+  },
+  password: {
+    type: String,
+    required: [true, 'Password is required'],
+    minlength: [6, 'Password must be at least 6 characters']
+  },
+  name: {
+    type: String,
+    required: [true, 'Name is required'],
+    trim: true
+  },
+  avatar: {
+    type: String,
+    default: 'default-avatar.png'
+  },
+  online: {
+    type: Boolean,
+    default: false
+  },
+  lastActive: {
+    type: Date,
+    default: Date.now
+  }
+}, { timestamps: true });
+
+// Password hashing middleware
+UserSchema.pre('save', async function(next) {
+  // Only hash the password if it has been modified (or is new)
+  if (this.isModified('password')) {
+    this.password = await bcrypt.hash(this.password, 10);
+  }
+  next();
+});
+
+// Method to generate JWT token
+UserSchema.methods.generateToken = function() {
+  return jwt.sign(
+    { 
+      id: this._id, 
+      username: this.username 
+    }, 
+    process.env.JWT_SECRET, 
+    { expiresIn: '30d' }
+  );
+};
+
+// Method to compare password
+UserSchema.methods.comparePassword = async function(candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Static method to sanitize user object
+UserSchema.statics.sanitizeUser = function(user) {
+  const { password, ...userWithoutPassword } = user.toObject ? user.toObject() : user;
+  return userWithoutPassword;
+};
+
+export const User = mongoose.model('User', UserSchema);
+
+route/
+
+authRoutes.js:
+
+import express from 'express';
+import AuthService from '../services/authService.js';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/User.js';
+
+const router = express.Router();
+
+// Middleware to verify token
+
+const authMiddleware = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    console.log("Token:", token);
+    
+    if (!token) {
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    const user = await AuthService.verifyToken(token);
+    console.log("Decoded User:", user);  // Debugging
+
+    if (!user || !user._id) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    req.user = { ...user, id: user._id.toString() };  // Ensure `id` is set
+    next();
+  } catch (error) {
+    console.error("Auth Error:", error);
+    res.status(401).json({ message: 'Unauthorized' });
+  }
+};
+
+
+
+// const authMiddleware = async (req, res, next) => {
+//   try {
+//     const token = req.headers.authorization?.split(' ')[1];
+//     console.log(token);
+    
+    
+//     if (!token) {
+//       return res.status(401).json({ message: 'No token provided' });
+//     }
+
+//     const user = await AuthService.verifyToken(token);
+//     console.log("abc", user);
+    
+//     req.user = user;
+//     next();
+//   } catch (error) {
+//     res.status(401).json({ message: 'Unauthorized' });
+//   }
+// };
+
+// User Registration
+router.post('/register', async (req, res) => {
+  try {
+    const { name, username, email, password } = req.body;
+    
+    const result = await AuthService.register({
+      name,
+      username,
+      email,
+      password
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(400).json({ 
+      message: error.message 
+    });
+  }
+});
+
+// User Login
+router.post('/login', async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+    
+    const result = await AuthService.login(identifier, password);
+
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(401).json({ 
+      message: error.message 
+    });
+  }
+});
+
+// Get Current User
+router.get('/me', authMiddleware, (req, res) => {
+  res.status(200).json(req.user);
+});
+
+// Update User Profile
+router.put('/profile', authMiddleware, async (req, res) => {
+  try {
+    const { name, avatar } = req.body;
+    
+    const user = await User.findByIdAndUpdate(
+      req.user.id, 
+      { name, avatar }, 
+      { new: true }
+    );
+
+    res.status(200).json(User.sanitizeUser(user));
+  } catch (error) {
+    res.status(400).json({ 
+      message: error.message 
+    });
+  }
+});
+
+export default router;
+export { authMiddleware };
+
+messageRoutes.js:
+
+import express from 'express';
+import { authMiddleware } from './authRoutes.js';
+import MessageService from '../services/messageService.js';
+import { Group } from '../models/Group.js';
+import { PrivateChat } from '../models/PrivateChat.js';
+
+const router = express.Router();
+
+// Create a new group
+router.post('/groups', authMiddleware, async (req, res) => {
+  try {
+    const { name, description, isPrivate, members } = req.body;
+    
+    const group = new Group({
+      name,
+      description,
+      creator: req.user.id,
+      members: [req.user.id, ...members],
+      admins: [req.user.id],
+      isPrivate
+    });
+
+    await group.save();
+
+    res.status(201).json(group);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Get user's groups
+router.get('/groups', authMiddleware, async (req, res) => {
+  try {
+    const groups = await Group.find({
+      members: req.user.id
+    }).populate('lastMessage');
+
+    res.status(200).json(groups);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get group messages
+router.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+
+    // Check if user is a member of the group
+    const group = await Group.findById(groupId);
+    if (!group || !group.members.includes(req.user.id)) {
+      return res.status(403).json({ message: 'Not a member of this group' });
+    }
+
+    const messages = await MessageService.getGroupMessages(
+      groupId, 
+      parseInt(page), 
+      parseInt(limit)
+    );
+
+    res.status(200).json(messages);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get or create private chat
+router.get('/private/:recipientId', authMiddleware, async (req, res) => {
+  try {
+    const { recipientId } = req.params;
+
+    // Find or create private chat
+    let privateChat = await PrivateChat.findOne({
+      participants: { $all: [req.user.id, recipientId] }
+    }).populate('lastMessage');
+
+    if (!privateChat) {
+      privateChat = new PrivateChat({
+        participants: [req.user.id, recipientId]
+      });
+      await privateChat.save();
+    }
+
+    res.status(200).json(privateChat);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get private chat messages
+router.get('/private/:recipientId/messages', authMiddleware, async (req, res) => {
+  try {
+    const { recipientId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+
+    // Find or create private chat
+    let privateChat = await PrivateChat.findOne({
+      participants: { $all: [req.user.id, recipientId] }
+    });
+
+    if (!privateChat) {
+      privateChat = new PrivateChat({
+        participants: [req.user.id, recipientId]
+      });
+      await privateChat.save();
+    }
+
+    const messages = await MessageService.getPrivateChatMessages(
+      privateChat._id, 
+      parseInt(page), 
+      parseInt(limit)
+    );
+
+    res.status(200).json(messages);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+export default router;
+
+services:
+
+authService.js:
+
+import { User } from '../models/User.js';
+import jwt from 'jsonwebtoken';
+
+
+class AuthService {
+  async register(userData) {
+    try {
+      // Check if user already exists
+      const existingUser = await User.findOne({
+        $or: [
+          { email: userData.email },
+          { username: userData.username }
+        ]
+      });
+
+      if (existingUser) {
+        throw new Error('User already exists');
+      }
+
+      // Create new user
+      const user = new User(userData);
+      await user.save();
+
+      // Generate token
+      const token = user.generateToken();
+
+      return {
+        user: User.sanitizeUser(user),
+        token
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async login(identifier, password) {
+    try {
+      // Find user by email or username
+      const user = await User.findOne({
+        $or: [
+          { email: identifier },
+          { username: identifier }
+        ]
+      });
+
+      if (!user) {
+        throw new Error('Invalid credentials');
+      }
+
+      // Check password
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        throw new Error('Invalid credentials');
+      }
+
+      // Update online status
+      user.online = true;
+      user.lastActive = new Date();
+      await user.save();
+
+      // Generate token
+      const token = user.generateToken();
+
+      return {
+        user: User.sanitizeUser(user),
+        token
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Verify JWT token
+
+
+  async verifyToken(token) {
+    try {
+      console.log("Token received:", token);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      // console.log("Decoded Token:", decoded);
+  
+      const user = await User.findById(decoded.id);
+      // console.log("User found:", user);
+      
+      if (!user) {
+        throw new Error('User not found');
+      }
+  
+      return User.sanitizeUser(user);
+    } catch (error) {
+      console.error("Token verification error:", error.message);
+      throw new Error('Invalid or expired token');
+    }
+  }
+  
+
+
+//   async verifyToken(token) {
+//     try {
+//       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+//       const user = await User.findById(decoded.id);
+//       console.log(user);
+      
+      
+//       if (!user) {
+//         throw new Error('User not found');
+//       }
+
+//       return User.sanitizeUser(user);
+//     } catch (error) {
+//       throw new Error('Invalid or expired token');
+//     }
+//   }
+
+
+
+}
+
+export default new AuthService();
+
+messageService.js:
+
+import { Group } from '../models/Group.js';
+import { Message } from '../models/Message.js';
+import { PrivateChat } from '../models/PrivateChat.js';
+import RedisClient from '../config/redisClient.js';
+
+class MessageService {
+  async saveGroupMessage(senderId, groupId, content) {
+    try {
+      const group = await Group.findById(groupId);
+      if (!group) {
+        throw new Error('Group not found');
+      }
+
+      const message = new Message({
+        content,
+        sender: senderId,
+        chat: groupId,
+        chatType: 'Group'
+      });
+
+      await message.save();
+
+      // Update group's last message
+      group.lastMessage = message._id;
+      await group.save();
+
+      // Populate sender details
+      await message.populate('sender', 'username name avatar');
+
+      // Cache the new message
+      await this.cacheNewGroupMessage(groupId, message);
+
+      return message;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async savePrivateMessage(senderId, recipientId, content) {
+    try {
+      let privateChat = await PrivateChat.findOne({
+        participants: { $all: [senderId, recipientId] }
+      });
+
+      if (!privateChat) {
+        privateChat = new PrivateChat({
+          participants: [senderId, recipientId]
+        });
+        await privateChat.save();
+      }
+
+      const message = new Message({
+        content,
+        sender: senderId,
+        chat: privateChat._id,
+        chatType: 'PrivateChat'
+      });
+
+      await message.save();
+
+      // Update last message in private chat
+      privateChat.lastMessage = message._id;
+      await privateChat.save();
+
+      // Populate sender details
+      await message.populate('sender', 'username name avatar');
+
+      // Cache the new message
+      await this.cacheNewPrivateMessage(privateChat._id, message);
+
+      return message;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getGroupMessages(groupId, page = 1, limit = 50) {
+    try {
+      // First, try to get messages from Redis cache
+      const cachedMessages = await RedisClient.getCachedGroupMessages(groupId, page, limit);
+      
+      if (cachedMessages && cachedMessages.length > 0) {
+        return cachedMessages;
+      }
+
+      // If no cached messages, fetch from database
+      const messages = await Message.find({ 
+        chat: groupId, 
+        chatType: 'Group' 
+      })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('sender', 'username name avatar');
+
+      // Cache fetched messages
+      await RedisClient.cacheGroupMessages(groupId, messages);
+
+      return messages;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getPrivateChatMessages(chatId, page = 1, limit = 50) {
+    try {
+      // First, try to get messages from Redis cache
+      const cachedMessages = await RedisClient.getCachedPrivateMessages(chatId, page, limit);
+      
+      if (cachedMessages && cachedMessages.length > 0) {
+        return cachedMessages;
+      }
+
+      // If no cached messages, fetch from database
+      const messages = await Message.find({ 
+        chat: chatId, 
+        chatType: 'PrivateChat' 
+      })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('sender', 'username name avatar');
+
+      // Cache fetched messages
+      await RedisClient.cachePrivateMessages(chatId, messages);
+
+      return messages;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Helper method to cache a new group message
+  async cacheNewGroupMessage(groupId, message) {
+    try {
+      // Get current cached messages
+      const currentCachedMessages = await RedisClient.getCachedGroupMessages(groupId) || [];
+      
+      // Add new message to the beginning of the cache
+      currentCachedMessages.unshift(message);
+      
+      // Re-cache with the new message included
+      await RedisClient.cacheGroupMessages(groupId, currentCachedMessages);
+    } catch (error) {
+      console.error('Error caching new group message:', error);
+    }
+  }
+
+  // Helper method to cache a new private message
+  async cacheNewPrivateMessage(chatId, message) {
+    try {
+      // Get current cached messages
+      const currentCachedMessages = await RedisClient.getCachedPrivateMessages(chatId) || [];
+      
+      // Add new message to the beginning of the cache
+      currentCachedMessages.unshift(message);
+      
+      // Re-cache with the new message included
+      await RedisClient.cachePrivateMessages(chatId, currentCachedMessages);
+    } catch (error) {
+      console.error('Error caching new private message:', error);
+    }
+  }
+}
+
+export default new MessageService();
+
+websocket/:
+
+server.js:
+
+import { WebSocketServer } from 'ws';
+import jwt from 'jsonwebtoken';
+import { v4 as uuidv4 } from 'uuid';
+import { User } from '../models/User.js';
+import { Group } from '../models/Group.js';
+import RedisClient from '../config/redisClient.js';
+import MessageService from '../services/messageService.js';
+
+class ChatWebSocketServer {
+  constructor(httpServer) {
+    this.wss = new WebSocketServer({ server: httpServer });
+    this.clients = new Map();
+    this.setupWebSocketServer();
+  }
+
+  setupWebSocketServer() {
+    this.wss.on('connection', async (ws, req) => {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const token = url.searchParams.get('token');
+      try {
+        const decoded = this.verifyToken(token);
+        const userId = decoded.id;
+        
+        ws.id = uuidv4();
+        
+        this.clients.set(ws.id, {
+          ws,
+          userId,
+          rooms: new Set()
+        });
+
+        await this.updateUserOnlineStatus(userId, true);
+        
+        await RedisClient.publish('user:status', JSON.stringify({
+          type: 'USER_ONLINE',
+          userId
+        }));
+
+        ws.on('message', async (message) => {
+          try {
+            const parsedMessage = JSON.parse(message.toString());
+            await this.handleMessage(userId, ws, parsedMessage);
+          } catch (error) {
+            this.sendErrorMessage(ws, 'Invalid message format');
+          }
+        });
+
+        ws.on('close', async () => {
+          await this.handleDisconnection(ws);
+        });
+
+        // Send cached messages for joined groups/chats
+        await this.sendCachedMessagesOnConnection(userId, ws);
+
+        this.sendMessage(ws, {
+          type: 'CONNECTION_ESTABLISHED',
+          userId
+        });
+      } catch (error) {
+        this.sendErrorMessage(ws, 'Authentication failed');
+        ws.close();
+      }
+    });
+  }
+
+  // New method to send cached messages when user connects
+  async sendCachedMessagesOnConnection(userId, ws) {
+    try {
+      // Get user's groups
+      const groups = await Group.find({ members: userId });
+      
+      for (const group of groups) {
+        const cachedMessages = await RedisClient.getCachedGroupMessages(group._id);
+        
+        if (cachedMessages && cachedMessages.length > 0) {
+          this.sendMessage(ws, {
+            type: 'CACHED_GROUP_MESSAGES',
+            groupId: group._id,
+            messages: cachedMessages
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error sending cached messages:', error);
+    }
+  }
+  
+  verifyToken(token) {
+    if (!token) {
+      throw new Error('No token provided');
+    }
+    return jwt.verify(token, process.env.JWT_SECRET);
+  }
+
+  async handleMessage(userId, ws, message) {
+    switch (message.type) {
+      // not tested
+      case 'JOIN_GROUP':
+        await this.handleGroupJoin(userId, ws, message.groupId);
+        break;
+      case 'SEND_GROUP_MESSAGE':
+        await this.handleGroupMessage(userId, message);
+        break;
+      case 'SEND_PRIVATE_MESSAGE':
+        await this.handlePrivateMessage(userId, message);
+        break;
+
+      // not tested
+      case 'TYPING':
+        await this.handleTyping(userId, message);
+        break;
+      default:
+        this.sendErrorMessage(ws, 'Unknown message type');
+    }
+  }
+
+  async handleGroupJoin(userId, ws, groupId) {
+    // Validate group membership
+    const isMember = await this.checkGroupMembership(userId, groupId);
+    
+    if (isMember) {
+      const client = this.getClientByWs(ws);
+      if (client) {
+        client.rooms.add(`group:${groupId}`);
+        
+        // Publish join event
+        await RedisClient.publish(`group:${groupId}`, JSON.stringify({
+          type: 'USER_JOINED',
+          userId,
+          groupId
+        }));
+      }
+    }
+  }
+
+  async handleGroupMessage(senderId, messageData) {
+    const { groupId, content } = messageData;
+
+    // Save message to database
+    const message = await MessageService.saveGroupMessage(senderId, groupId, content);
+
+    // Publish to group channel
+    await RedisClient.publish(`group:${groupId}`, JSON.stringify({
+      type: 'GROUP_MESSAGE',
+      message,
+      senderId
+    }));
+  }
+
+  async handlePrivateMessage(senderId, messageData) {
+    const { recipientId, content } = messageData;
+
+    // Save message to database
+    const message = await MessageService.savePrivateMessage(senderId, recipientId, content);
+
+    // Publish to both sender and recipient channels
+    await RedisClient.publish(`user:${senderId}`, JSON.stringify({
+      type: 'PRIVATE_MESSAGE',
+      message,
+      senderId
+    }));
+
+    await RedisClient.publish(`user:${recipientId}`, JSON.stringify({
+      type: 'PRIVATE_MESSAGE',
+      message,
+      senderId
+    }));
+  }
+
+  async handleTyping(userId, typingData) {
+    const { roomId, isTyping } = typingData;
+
+    // Publish typing event to room
+    await RedisClient.publish(roomId, JSON.stringify({
+      type: 'TYPING',
+      userId,
+      isTyping
+    }));
+  }
+
+
+  // not tested
+  async handleDisconnection(ws) {
+    const client = this.getClientByWs(ws);
+    if (client) {
+      // Remove client from tracking
+      this.clients.delete(ws.id);
+
+      // Update user's online status
+      await this.updateUserOnlineStatus(client.userId, false);
+
+      // Broadcast user offline status
+      await RedisClient.publish('user:status', JSON.stringify({
+        type: 'USER_OFFLINE',
+        userId: client.userId
+      }));
+    }
+  }
+
+  async updateUserOnlineStatus(userId, isOnline) {
+    try {
+      const user = await User.findByIdAndUpdate(userId, {
+        online: isOnline,
+        lastActive: new Date()
+      }, { new: true });
+
+      return user;
+    } catch (error) {
+      console.error('Failed to update user online status:', error);
+    }
+  }
+
+  // Utility method to check group membership
+  async checkGroupMembership(userId, groupId) {
+    try {
+      const group = await Group.findById(groupId);
+      return group.members.includes(userId);
+    } catch (error) {
+      console.error('Group membership check failed:', error);
+      return false;
+    }
+  }
+
+  sendMessage(ws, message) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+    }
+  }
+
+  sendErrorMessage(ws, errorMessage) {
+    this.sendMessage(ws, {
+      type: 'ERROR',
+      message: errorMessage
+    });
+  }
+
+  getClientByWs(ws) {
+    return Array.from(this.clients.values()).find(client => client.ws === ws);
+  }
+}
+
+export default ChatWebSocketServer;
+
+src/server.js:-
+
+import express from 'express';
+import http from 'http';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import WebSocketServer from './websocket/server.js';
+import authRoutes from './routes/authRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import RedisClient from './config/redisClient.js';
+
+// Load environment variables
+dotenv.config();
+
+class ChatServer {
+  constructor() {
+    this.app = express();
+    this.httpServer = http.createServer(this.app);
+    this.wsServer = null;
+
+    this.initializeMiddlewares();
+    this.initializeRoutes();
+    this.connectDatabase();
+    this.connectRedis();
+  }
+
+  initializeMiddlewares() {
+    // Middleware configuration
+    this.app.use(cors({
+      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      credentials: true
+    }));
+    this.app.use(express.json());
+    this.app.use(express.urlencoded({ extended: true }));
+  }
+
+  initializeRoutes() {
+    // API routes
+    this.app.use('/api/auth', authRoutes);
+    this.app.use('/api/messages', messageRoutes);
+
+    // Healthcheck route
+    this.app.get('/api/health', (req, res) => {
+      res.status(200).json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString() 
+      });
+    });
+  }
+
+  async connectDatabase() {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+      });
+      console.log('MongoDB connected successfully');
+    } catch (error) {
+      console.error('MongoDB connection error:', error);
+      process.exit(1);
+    }
+  }
+
+  async connectRedis() {
+    try {
+      await RedisClient.connect();
+    } catch (error) {
+      console.error('Redis connection error:', error);
+      process.exit(1);
+    }
+  }
+
+  startWebSocketServer() {
+    this.wsServer = new WebSocketServer(this.httpServer);
+  }
+
+  start() {
+    const PORT = process.env.PORT ? parseInt(process.env.PORT) : 5000;
+    
+    this.httpServer.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      this.startWebSocketServer();
+    });
+  }
+}
+
+// Export and start the server
+const server = new ChatServer();
+server.start();
+
+export default server;
