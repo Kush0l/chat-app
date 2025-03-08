@@ -78,7 +78,7 @@ const CreateGroup = () => {
           />
         </div>
         <div>
-          <label>Members (comma-separated user IDs):</label>
+          <label>Members (comma-separated usernames):</label>
           <input
             type="text"
             name="members"

@@ -41,15 +41,15 @@ const GetUserGroups = () => {
             <li key={group._id}>
               <h3>{group.name}</h3>
               <p>{group.description}</p>
-              <p><strong>Creator:</strong> {group.creator}</p>
-              <p><strong>Members:</strong> {group.members.join(', ')}</p>
-              <p><strong>Admins:</strong> {group.admins.join(', ')}</p>
+              <p><strong>Creator:</strong> {group.creator.name}</p>
+              <p><strong>Members:</strong> {group.members.map(member => member.name).join(', ')}</p>
+              <p><strong>Admins:</strong> {group.admins.map(admin => admin.name).join(', ')}</p>
               <p><strong>Private:</strong> {group.isPrivate ? 'Yes' : 'No'}</p>
               {group.lastMessage && (
                 <div>
                   <h4>Last Message:</h4>
                   <p><strong>Content:</strong> {group.lastMessage.content}</p>
-                  <p><strong>Sender:</strong> {group.lastMessage.sender}</p>
+                  <p><strong>Sender:</strong> {group.lastMessage.sender.name}</p>
                   <p><strong>Sent At:</strong> {new Date(group.lastMessage.createdAt).toLocaleString()}</p>
                 </div>
               )}

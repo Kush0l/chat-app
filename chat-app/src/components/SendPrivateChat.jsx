@@ -74,7 +74,7 @@ const SendPrivateChat = () => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       const data = {
         type: 'SEND_PRIVATE_MESSAGE',
-        recipientId: recipientId,
+        recipientUsername: recipientId,
         content: messageContent,
       };
       ws.current.send(JSON.stringify(data));

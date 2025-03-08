@@ -42,10 +42,10 @@ const GetOrCreatePrivateChat = () => {
     <div>
       <h2>Get or Create Private Chat</h2>
 
-      {/* Input field for recipientId */}
+      {/* Input field for recipientUsername */}
       <div>
         <label>
-          Recipient ID:
+          Recipient UserName:
           <input
             type="text"
             value={recipientId}

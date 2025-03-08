@@ -55,7 +55,7 @@ const GetPrivateChatMessages = () => {
       {/* Input field for recipientId */}
       <div>
         <label>
-          Recipient ID:
+          Recipient username:
           <input
             type="text"
             value={recipientId}

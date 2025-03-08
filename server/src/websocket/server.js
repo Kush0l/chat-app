@@ -390,23 +390,58 @@ class ChatWebSocketServer {
     }));
   }
 
-  async handlePrivateMessage(senderId, messageData) {
-    const { recipientId, content } = messageData;
+  // async handlePrivateMessage(senderId, messageData) {
+  //   const { recipientId, content } = messageData;
 
+  //   const message = await MessageService.savePrivateMessage(senderId, recipientId, content);
+
+  //   await RedisClient.publish(`user:${senderId}`, JSON.stringify({
+  //     type: 'PRIVATE_MESSAGE',
+  //     message,
+  //     senderId,
+  //   }));
+
+  //   await RedisClient.publish(`user:${recipientId}`, JSON.stringify({
+  //     type: 'PRIVATE_MESSAGE',
+  //     message,
+  //     senderId,
+  //   }));
+  // }
+
+
+
+async handlePrivateMessage(senderId, messageData) {
+  try {
+    const { recipientUsername, content } = messageData;
+
+    // Find the recipient's user ID from their username
+    const recipient = await User.findOne({ username: recipientUsername });
+    if (!recipient) {
+      throw new Error('Recipient not found');
+    }
+    const recipientId = recipient._id;
+
+    // Save the private message
     const message = await MessageService.savePrivateMessage(senderId, recipientId, content);
 
+    // Publish the message to the sender's Redis channel
     await RedisClient.publish(`user:${senderId}`, JSON.stringify({
       type: 'PRIVATE_MESSAGE',
       message,
       senderId,
     }));
 
+    // Publish the message to the recipient's Redis channel
     await RedisClient.publish(`user:${recipientId}`, JSON.stringify({
       type: 'PRIVATE_MESSAGE',
       message,
       senderId,
     }));
+  } catch (error) {
+    console.error('Error handling private message:', error);
+    throw error; // Re-throw the error for further handling
   }
+}
 
   async handleTyping(userId, typingData) {
     const { roomId, isTyping } = typingData;
