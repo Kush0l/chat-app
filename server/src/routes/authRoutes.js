@@ -32,27 +32,6 @@ const authMiddleware = async (req, res, next) => {
 };
 
 
-
-// const authMiddleware = async (req, res, next) => {
-//   try {
-//     const token = req.headers.authorization?.split(' ')[1];
-//     console.log(token);
-    
-    
-//     if (!token) {
-//       return res.status(401).json({ message: 'No token provided' });
-//     }
-
-//     const user = await AuthService.verifyToken(token);
-//     console.log("abc", user);
-    
-//     req.user = user;
-//     next();
-//   } catch (error) {
-//     res.status(401).json({ message: 'Unauthorized' });
-//   }
-// };
-
 // User Registration
 router.post('/register', async (req, res) => {
   try {

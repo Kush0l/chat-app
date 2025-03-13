@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import API from "../services/api";
 
 const Login = () => {
@@ -6,6 +7,8 @@ const Login = () => {
     identifier: "",
     password: "",
   });
+
+  const navigate = useNavigate();
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -19,6 +22,7 @@ const Login = () => {
       localStorage.setItem("token", token);
       console.log("Login Success:", response.data);
       alert("Login successful!");
+      navigate("/home");
     } catch (error) {
       console.error("Error:", error.response?.data);
       alert(error.response?.data?.message || "Login failed");

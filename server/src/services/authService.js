@@ -92,26 +92,6 @@ class AuthService {
       throw new Error('Invalid or expired token');
     }
   }
-  
-
-
-//   async verifyToken(token) {
-//     try {
-//       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-//       const user = await User.findById(decoded.id);
-//       console.log(user);
-      
-      
-//       if (!user) {
-//         throw new Error('User not found');
-//       }
-
-//       return User.sanitizeUser(user);
-//     } catch (error) {
-//       throw new Error('Invalid or expired token');
-//     }
-//   }
-
 
 
 }

@@ -66,44 +66,8 @@ router.post('/groups', authMiddleware, async (req, res) => {
   }
 });
 
-// Get user's groups
-// router.get('/groups', authMiddleware, async (req, res) => {
-//   try {
-//     console.log(req.user, "hihihihi");
-
-//     const groups = await Group.find({
-//       members: req.user.id
-//     }).populate('lastMessage');
-
-//     res.status(200).json(groups);
-//   } catch (error) {
-//     res.status(500).json({ message: error.message });
-//   }
-// });
 
 
-
-// ------------------------------------------------------------
-
-// router.get('/groups', authMiddleware, async (req, res) => {
-//   try {
-//     console.log(req.user, "hihihihi");
-
-//     const groups = await Group.find({
-//       members: req.user.id
-//     }).populate('lastMessage').populate({
-//       path: 'members',
-//       select: 'name' // Select the fields you want to retrieve
-//     });
-
-//     res.status(200).json(groups);
-//   } catch (error) {
-//     res.status(500).json({ message: error.message });
-//   }
-// });
-
-
-// ---------------------------------------------------------
 
 router.get('/groups', authMiddleware, async (req, res) => {
   try {
@@ -163,30 +127,6 @@ router.get('/groups/:groupId/messages', authMiddleware, async (req, res) => {
   }
 });
 
-// Get or create private chat
-// router.get('/private/:recipientId', authMiddleware, async (req, res) => {
-//   try {
-//     const { recipientId } = req.params;
-
-//     // Find or create private chat
-//     let privateChat = await PrivateChat.findOne({
-//       participants: { $all: [req.user.id, recipientId] }
-//     }).populate('lastMessage');
-
-//     if (!privateChat) {
-//       privateChat = new PrivateChat({
-//         participants: [req.user.id, recipientId]
-//       });
-//       await privateChat.save();
-//     }
-
-//     res.status(200).json(privateChat);
-//   } catch (error) {
-//     res.status(500).json({ message: error.message });
-//   }
-// });
-
-
 
 // Get or create private chat
 router.get('/private/:recipientUsername', authMiddleware, async (req, res) => {
@@ -219,37 +159,6 @@ router.get('/private/:recipientUsername', authMiddleware, async (req, res) => {
 });
 
 
-// ------------------------------------------------------------------------------
-
-// Get private chat messages
-// router.get('/private/:recipientId/messages', authMiddleware, async (req, res) => {
-//   try {
-//     const { recipientId } = req.params;
-//     const { page = 1, limit = 50 } = req.query;
-
-//     // Find or create private chat
-//     let privateChat = await PrivateChat.findOne({
-//       participants: { $all: [req.user.id, recipientId] }
-//     });
-
-//     if (!privateChat) {
-//       privateChat = new PrivateChat({
-//         participants: [req.user.id, recipientId]
-//       });
-//       await privateChat.save();
-//     }
-
-//     const messages = await MessageService.getPrivateChatMessages(
-//       privateChat._id, 
-//       parseInt(page), 
-//       parseInt(limit)
-//     );
-
-//     res.status(200).json(messages);
-//   } catch (error) {
-//     res.status(500).json({ message: error.message });
-//   }
-// });
 
 
 // Get private chat messages

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import API from "../services/api";
 
 const Register = () => {
@@ -8,6 +9,8 @@ const Register = () => {
     email: "",
     password: "",
   });
+
+  const navigate = useNavigate();
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -19,6 +22,7 @@ const Register = () => {
       const response = await API.post("/auth/register", form);
       console.log("Registration Success:", response.data);
       alert("Registration successful!");
+      navigate("/login");
     } catch (error) {
       console.error("Error:", error.response?.data);
       alert(error.response?.data?.message || "Registration failed");
